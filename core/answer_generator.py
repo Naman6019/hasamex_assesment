@@ -4,12 +4,15 @@ The model may write a short answer, but it is never trusted. It must return
 claims, each carrying verbatim quotes copied from numbered source turns. Code
 then re-checks every claim against the transcripts and drops any that fail, so
 nothing the model made up reaches the user.
+
+The helpers here (quote, figure and market-attribution checks) are shared with
+the model-drafted synthesis in ``core/synthesis_model.py``.
 """
 
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from core.extractor import verify_quote
 
@@ -30,12 +33,17 @@ Reply with JSON only, in this shape:
 {"supported": true, "claims": [{"text": "<one sentence>", "evidence": [{"source": "S1", "quote": "<verbatim words>"}]}]}"""
 
 MIN_QUOTE_WORDS = 3
-NUMBER_WORDS = {
-    "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
-    "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
-    "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand",
-    "million", "billion",
+
+_UNITS = {
+    "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
 }
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_SCALES = {"hundred": 100, "thousand": 1000, "million": 1000000, "billion": 1000000000}
+_ONES = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+_COMPOUND = re.compile(rf"\b({'|'.join(_TENS)})[- ]({'|'.join(_ONES)})\b")
+_NUMBER_TOKEN = re.compile(r"\d+(?:\.\d+)?|[a-z]+")
 
 
 @dataclass
@@ -64,13 +72,16 @@ class VerificationResult:
 
 
 def build_prompts(query: str, candidates: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
-    sources = "\n\n".join(
+    return {"system_prompt": SYSTEM_PROMPT, "user_prompt": f"Question: {query}\n\nSources:\n\n{format_sources(candidates)}"}
+
+
+def format_sources(candidates: Dict[str, Dict[str, Any]]) -> str:
+    return "\n\n".join(
         f"{source_id} | {turn['market']} | {turn['timestamp']} | {turn['speaker']}\n"
         f"Question asked: {turn['prompt_context'] or '(not recorded)'}\n"
         f"Answer: {turn['text']}"
         for source_id, turn in candidates.items()
     )
-    return {"system_prompt": SYSTEM_PROMPT, "user_prompt": f"Question: {query}\n\nSources:\n\n{sources}"}
 
 
 def parse_model_reply(content: str) -> Optional[Dict[str, Any]]:
@@ -91,17 +102,32 @@ def parse_model_reply(content: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _figures(text: str) -> Set[str]:
-    """Digits and spelled-out numbers: the details most often invented."""
-    tokens = re.findall(r"\d+(?:\.\d+)?|[a-z]+", text.lower())
-    return {token for token in tokens if token[0].isdigit() or token in NUMBER_WORDS}
+def figures(text: str) -> Set[str]:
+    """Numbers in ``text`` as digit strings, so "six", "6" and "twenty-four"/"24" compare equal.
+
+    Figures are the details most often invented, so claims are checked against them.
+    "one" is ignored because it is usually a pronoun ("one surgeon").
+    """
+    lowered = _COMPOUND.sub(lambda m: str(_TENS[m.group(1)] + _ONES[m.group(2)]), text.lower())
+    found: Set[str] = set()
+    for token in _NUMBER_TOKEN.findall(lowered):
+        if token[0].isdigit():
+            found.add(str(int(float(token))) if float(token) == int(float(token)) else token)
+        elif token in _UNITS:
+            found.add(str(_UNITS[token]))
+        elif token in _TENS:
+            found.add(str(_TENS[token]))
+        elif token in _SCALES:
+            found.add(str(_SCALES[token]))
+    return found
 
 
-def _tokens(text: str) -> Set[str]:
+def word_set(text: str) -> Set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
 
 
-def _verify_quote_in_turn(quote: str, turn: Dict[str, Any], raw_text: str) -> Optional[VerifiedQuote]:
+def verify_quote_in_turn(quote: str, turn: Dict[str, Any], raw_text: str) -> Optional[VerifiedQuote]:
+    """Return the quote (with transcript offsets) only if it is verbatim in ``turn``."""
     clean = quote.strip(" \"'“”‘’")
     if len(clean.split()) < MIN_QUOTE_WORDS:
         return None
@@ -114,6 +140,19 @@ def _verify_quote_in_turn(quote: str, turn: Dict[str, Any], raw_text: str) -> Op
         start = turn_start + offset
         end = start + len(clean)
     return VerifiedQuote(source_id="", quote=clean, char_start=start, char_end=end, score=score)
+
+
+def text_is_grounded(
+    text: str,
+    quotes: Iterable[str],
+    cited_markets: Set[str],
+    market_terms: Dict[str, Set[str]],
+) -> bool:
+    """Model-written text may only state figures its quotes contain and name markets it cites."""
+    if not figures(text) <= figures(" ".join(quotes)):
+        return False
+    words = word_set(text)
+    return all(not (terms & words) or market in cited_markets for market, terms in market_terms.items())
 
 
 def verify_model_reply(
@@ -146,6 +185,29 @@ def verify_model_reply(
     return result
 
 
+def verify_evidence(
+    evidence: Any,
+    candidates: Dict[str, Dict[str, Any]],
+    raw_texts: Dict[str, str],
+) -> List[VerifiedQuote]:
+    """Verified quotes for every evidence item that checks out; invalid items are skipped."""
+    verified: List[VerifiedQuote] = []
+    if not isinstance(evidence, list):
+        return verified
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        source_id = str(item.get("source") or "").strip().upper()
+        turn = candidates.get(source_id)
+        if turn is None:
+            continue
+        quote = verify_quote_in_turn(str(item.get("quote") or ""), turn, raw_texts.get(turn["expert_id"], ""))
+        if quote is not None:
+            quote.source_id = source_id
+            verified.append(quote)
+    return verified
+
+
 def _verify_claim(
     claim: Any,
     candidates: Dict[str, Dict[str, Any]],
@@ -159,30 +221,11 @@ def _verify_claim(
     if not text or not isinstance(evidence, list) or not evidence:
         return None
 
-    quotes: List[VerifiedQuote] = []
-    markets: Set[str] = set()
-    for item in evidence:
-        if not isinstance(item, dict):
-            return None
-        source_id = str(item.get("source") or "").strip().upper()
-        turn = candidates.get(source_id)
-        if turn is None:
-            return None
-        verified = _verify_quote_in_turn(str(item.get("quote") or ""), turn, raw_texts.get(turn["expert_id"], ""))
-        if verified is None:
-            return None
-        verified.source_id = source_id
-        quotes.append(verified)
-        markets.add(turn["market"])
-
-    # Any figure in the claim must appear in the quotes that back it.
-    quoted_figures = _figures(" ".join(quote.quote for quote in quotes))
-    if not _figures(text) <= quoted_figures:
+    # Every cited quote must verify; one bad quote invalidates the claim.
+    quotes = verify_evidence(evidence, candidates, raw_texts)
+    if len(quotes) != len(evidence):
         return None
-
-    # A claim about a market must cite that market.
-    claim_tokens = _tokens(text)
-    for market, terms in market_terms.items():
-        if terms & claim_tokens and market not in markets:
-            return None
+    markets = {candidates[quote.source_id]["market"] for quote in quotes}
+    if not text_is_grounded(text, (quote.quote for quote in quotes), markets, market_terms):
+        return None
     return VerifiedClaim(text=text, quotes=quotes, markets=markets)

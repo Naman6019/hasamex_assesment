@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from core.analyzer import generate_cross_expert_synthesis
 from core.extractor import ExpertAnswerExtractor, INTERVIEW_QUESTIONS
 from core.llm_service import LocalModelService, get_hosted_model_service, list_local_models
-from core.models import ExpertTranscript, QuoteCitation
+from core.models import CrossExpertSynthesis, ExpertTranscript, QuoteCitation
 from core.parser import parse_transcript
 from core.qa_engine import CrossTranscriptQA
 
@@ -61,32 +61,38 @@ def load_case_transcripts() -> List[ExpertTranscript]:
     return transcripts
 
 
-def build_report(transcripts: List[ExpertTranscript]) -> str:
-    synthesis = generate_cross_expert_synthesis(transcripts)
+def build_report(synthesis: CrossExpertSynthesis) -> str:
     lines = [
         "# European Robotic Surgery Market — Expert Call Brief",
         "",
         "## Executive summary",
         synthesis.executive_summary,
         "",
+        f"_{synthesis.method}._",
+        "",
         "## Cross-market comparison",
         "",
     ]
     for item in synthesis.comparison_matrix:
-        lines.extend(
-            [
-                f"### {item.dimension}",
-                f"- **France:** {item.france}",
-                f"- **Germany:** {item.germany}",
-                f"- **United Kingdom:** {item.uk}",
-                "",
-            ]
-        )
-    lines.extend(["## Source evidence", ""])
+        lines.append(f"### {item.dimension}")
+        lines.extend(f"- **{label}:** {cell}" for label, cell in item.cells.items())
+        lines.append("")
+
+    lines.extend(["## Where the calls align", ""])
     for theme in synthesis.common_themes:
-        lines.extend([f"### {theme.title}", theme.summary])
+        lines.extend([f"### {theme.title}", theme.summary, f"_{theme.consensus_level}_"])
         lines.extend(f"- **{source}:** {quote}" for source, quote in theme.supporting_evidence.items())
         lines.append("")
+    if not synthesis.common_themes:
+        lines.extend(["No topic recurs across enough calls to report as a theme.", ""])
+
+    lines.extend(["## Where the calls differ", ""])
+    for disagreement in synthesis.disagreements:
+        lines.extend([f"### {disagreement.topic}", disagreement.description])
+        lines.extend(f"- **{source}:** {quote}" for source, quote in disagreement.expert_positions.items())
+        lines.append("")
+    if not synthesis.disagreements:
+        lines.extend(["No conflicting positions were identified.", ""])
     return "\n".join(lines)
 
 
@@ -136,6 +142,32 @@ if "run_qa" not in st.session_state:
     st.session_state.run_qa = False
 
 
+def model_key() -> tuple:
+    """Identifies the transcripts and model a drafted synthesis belongs to."""
+    return (
+        st.session_state.inference_mode,
+        st.session_state.selected_model,
+        tuple(t.profile.id for t in st.session_state.transcripts),
+    )
+
+
+def current_synthesis() -> CrossExpertSynthesis:
+    """Model-drafted synthesis if one exists for this model and transcript set, else the computed one.
+
+    The computed synthesis is derived from the loaded transcripts, so it updates
+    whenever a transcript is added; it is cached per transcript set.
+    """
+    drafted = st.session_state.get("model_synthesis")
+    if drafted and drafted["key"] == model_key():
+        return drafted["value"]
+    ids = tuple(t.profile.id for t in st.session_state.transcripts)
+    cached = st.session_state.get("computed_synthesis")
+    if not cached or cached["key"] != ids:
+        cached = {"key": ids, "value": generate_cross_expert_synthesis(st.session_state.transcripts)}
+        st.session_state.computed_synthesis = cached
+    return cached["value"]
+
+
 with st.sidebar:
     st.title("Hasamex Intelligence")
     st.caption("Expert-call research, built for reviewable evidence.")
@@ -161,9 +193,9 @@ with st.sidebar:
 
     with st.expander("Model & privacy", expanded=False):
         st.caption(
-            "Guide answers, themes and the comparison table never use a model. In the two model modes the LLM "
-            "writes a short answer to your question, and the app drops any claim whose quote it cannot find "
-            "verbatim in the transcript."
+            "Guide answers and the comparison table never use a model. Themes and disagreements are computed from "
+            "the transcripts by default. In the two model modes the LLM can answer your questions and, on request, "
+            "draft themes; the app drops any claim whose quote it cannot find verbatim in the transcripts."
         )
         st.session_state.inference_mode = st.radio(
             "Question-answering mode",
@@ -190,7 +222,7 @@ with st.sidebar:
     st.divider()
     st.download_button(
         "Download cited research brief (.md)",
-        data=build_report(st.session_state.transcripts),
+        data=build_report(current_synthesis()),
         file_name="hasamex_research_brief.md",
         mime="text/markdown",
         use_container_width=True,
@@ -204,7 +236,7 @@ elif st.session_state.inference_mode == "Hosted compatible API":
 else:
     llm_service = None
 extractor = ExpertAnswerExtractor()
-synthesis = generate_cross_expert_synthesis(st.session_state.transcripts)
+synthesis = current_synthesis()
 qa_engine = CrossTranscriptQA(st.session_state.transcripts, llm_service=llm_service)
 
 st.markdown(
@@ -259,17 +291,11 @@ with overview_tab:
                 st.caption(f"{transcript.total_turns} turns · {transcript.duration_str} duration")
 
     st.subheader("Cross-market comparison")
-    matrix_rows = [
-        {
-            "Dimension": item.dimension,
-            "France": item.france,
-            "Germany": item.germany,
-            "United Kingdom": item.uk,
-        }
-        for item in synthesis.comparison_matrix
-    ]
+    matrix_rows = [{"Dimension": item.dimension, **item.cells} for item in synthesis.comparison_matrix]
     st.dataframe(matrix_rows, use_container_width=True, hide_index=True)
-    st.caption("The Themes tab supplies the exact supporting source for comparative findings.")
+    st.caption(
+        "Each cell is the expert's own answer with its timestamp; the columns follow whichever transcripts are loaded."
+    )
 
 
 with guide_tab:
@@ -305,10 +331,28 @@ with guide_tab:
 
 with themes_tab:
     st.subheader("Consensus and disagreements")
+    st.caption(f"How this was produced: {synthesis.method}.")
+    if synthesis.notes:
+        st.warning(synthesis.notes)
+    if llm_service is not None:
+        drafted_now = model_key() == (st.session_state.get("model_synthesis") or {}).get("key")
+        button_label = "Redraft with the model" if drafted_now else "Draft themes and disagreements with the model"
+        if st.button(button_label, help="Every quote the model returns is verified against the transcripts."):
+            with st.spinner("Drafting and verifying..."):
+                st.session_state.model_synthesis = {
+                    "key": model_key(),
+                    "value": generate_cross_expert_synthesis(st.session_state.transcripts, llm_service),
+                }
+            st.rerun()
+        if drafted_now and st.button("Switch back to the computed themes"):
+            st.session_state.pop("model_synthesis", None)
+            st.rerun()
     consensus_column, difference_column = st.columns(2)
 
     with consensus_column:
         st.markdown("### Where the calls align")
+        if not synthesis.common_themes:
+            st.info("No topic recurs across enough of the loaded calls to report as a theme.")
         for theme in synthesis.common_themes:
             with st.container(border=True):
                 st.markdown(f"#### {theme.title}")
@@ -320,6 +364,8 @@ with themes_tab:
 
     with difference_column:
         st.markdown("### Where the calls differ")
+        if not synthesis.disagreements:
+            st.info("No conflicting positions were identified in the loaded calls.")
         for disagreement in synthesis.disagreements:
             with st.container(border=True):
                 st.markdown(f"#### {disagreement.topic}")
@@ -451,7 +497,14 @@ with architecture_tab:
         Hosted mode sends only retrieved candidate turns (never the full transcripts) to the configured provider and keeps
         its API key in server-side configuration. No model is called when retrieval has already refused the question.
 
-        **6. Scaling to 30+ calls.** Persist turns and metadata in Postgres, add hybrid BM25/vector retrieval,
+        **6. Cross-call synthesis.** Nothing is hand-written about a particular call. The comparison table is each expert's
+        cited answer to every guide question; themes are topics that recur across at least half of the loaded calls
+        (recurring words are clustered by the passages they appear in); disagreements are guide questions where experts
+        quote figures that do not match. All of it is recomputed when a transcript is added. Optionally, a model can draft
+        richer themes and disagreements; each quote it returns is verified, its supporting-call count is recounted from
+        the verified quotes, and the computed results remain the fallback.
+
+        **7. Scaling to 30+ calls.** Persist turns and metadata in Postgres, add hybrid BM25/vector retrieval,
         queue ingestion and embedding jobs, and keep the same citation schema at every stage.
         """
     )

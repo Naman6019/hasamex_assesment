@@ -46,6 +46,7 @@ def parse_transcript(raw_text: str, filename_hint: str = "") -> ExpertTranscript
     
     # 1. Parse Header Metadata
     expert_num = 1
+    has_expert_number = False
     expert_name = "Unknown Expert"
     role = "Expert"
     market = "Europe"
@@ -69,6 +70,7 @@ def parse_transcript(raw_text: str, filename_hint: str = "") -> ExpertTranscript
         if expert_match:
             if expert_match.group(1):
                 expert_num = int(expert_match.group(1))
+                has_expert_number = True
             expert_name = expert_match.group(2).strip()
         elif line_clean.lower().startswith("role:"):
             role = line_clean.split(":", 1)[1].strip()
@@ -84,17 +86,15 @@ def parse_transcript(raw_text: str, filename_hint: str = "") -> ExpertTranscript
         elif "uk" in filename_hint.lower():
             market = "United Kingdom"
 
-    profile_id = f"expert_{expert_num}"
-    if "france" in market.lower():
-        profile_id = "expert_1_france"
-    elif "germany" in market.lower():
-        profile_id = "expert_2_germany"
-    elif "kingdom" in market.lower() or "uk" in market.lower():
-        profile_id = "expert_3_uk"
-    elif filename_hint:
-        # Uploaded files need a stable, collision-resistant session identifier.
-        stem = Path(filename_hint).stem.lower()
-        profile_id = "uploaded_" + re.sub(r"[^a-z0-9]+", "_", stem).strip("_")
+    # The id keys transcripts in retrieval and verification, so it must be unique per
+    # expert even when two experts cover the same market.
+    def slug(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+
+    if has_expert_number:
+        profile_id = f"expert_{expert_num}_{slug(market)}_{slug(expert_name)}"
+    else:
+        profile_id = "uploaded_" + slug(Path(filename_hint).stem if filename_hint else expert_name)
 
     flag = get_country_flag(market)
     profile = ExpertProfile(

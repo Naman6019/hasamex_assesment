@@ -1,7 +1,7 @@
 """Shared word-level text helpers for retrieval and guide-question extraction."""
 
 import re
-from typing import List
+from typing import List, Set
 
 
 def stem_token(word: str) -> str:
@@ -26,3 +26,21 @@ def stem_token(word: str) -> str:
 
 def tokenize(text: str) -> List[str]:
     return re.findall(r"[a-z0-9]+", text.lower())
+
+
+# Known market adjectives; the market name itself is always included.
+MARKET_ALIASES = {
+    "france": ("french",),
+    "germany": ("german",),
+    "united kingdom": ("uk", "british", "britain"),
+    "italy": ("italian",),
+    "spain": ("spanish",),
+}
+
+
+def market_terms(market: str) -> Set[str]:
+    """Words that refer to ``market`` in a query or in model-written text."""
+    key = market.lower()
+    terms = set(tokenize(key))
+    terms.update(MARKET_ALIASES.get(key, ()))
+    return terms

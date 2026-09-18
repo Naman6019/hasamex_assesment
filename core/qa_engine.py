@@ -9,7 +9,7 @@ from core.answer_generator import VerificationResult, build_prompts, parse_model
 from core.extractor import verify_quote
 from core.llm_service import OpenAICompatibleModelService
 from core.models import ExpertTranscript, QAResponse, QuoteCitation
-from core.textutil import stem_token, tokenize as _tokens
+from core.textutil import market_terms as _market_terms, stem_token, tokenize as _tokens
 
 
 STOP_WORDS = {
@@ -19,15 +19,6 @@ STOP_WORDS = {
     "tell", "than", "that", "the", "their", "them", "there", "these", "they", "this", "to", "was",
     "were", "what", "when", "where", "which", "who", "why", "will", "with", "would", "you", "your",
     "europe", "european", "expert", "experts", "call", "calls", "transcript", "transcripts",
-}
-
-# Known market adjectives; the market name itself is added per transcript.
-MARKET_ALIASES = {
-    "france": ("french",),
-    "germany": ("german",),
-    "united kingdom": ("uk", "british", "britain"),
-    "italy": ("italian",),
-    "spain": ("spanish",),
 }
 
 # Query-stem -> alternative stems that express the same idea in these calls.
@@ -51,13 +42,6 @@ SYNONYMS = {
 MIN_COVERAGE = 0.3  # below this the best turn is not evidence for the question
 HIGH_COVERAGE = 0.7
 MEDIUM_COVERAGE = 0.45
-
-
-def _market_terms(market: str) -> Set[str]:
-    key = market.lower()
-    terms = set(_tokens(key))
-    terms.update(MARKET_ALIASES.get(key, ()))
-    return terms
 
 
 def _name_terms(name: str) -> Set[str]:

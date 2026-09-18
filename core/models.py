@@ -69,8 +69,8 @@ class CrossExpertTheme(BaseModel):
     theme_id: str
     title: str
     summary: str
-    consensus_level: str = "High"  # High, Moderate
-    supporting_evidence: Dict[str, str] = Field(default_factory=dict)  # expert_id -> explanation/quote
+    consensus_level: str = "High"  # e.g. "Supported by 3 of 3 calls"
+    supporting_evidence: Dict[str, str] = Field(default_factory=dict)  # "Market · Expert" -> "[mm:ss] verbatim quote"
 
 
 class CrossExpertDisagreement(BaseModel):
@@ -78,15 +78,13 @@ class CrossExpertDisagreement(BaseModel):
     topic: str
     description: str
     divergence_type: str  # Strategic, Outlook, Timeline, Operational
-    expert_positions: Dict[str, str] = Field(default_factory=dict)  # expert_id -> stance/quote
+    expert_positions: Dict[str, str] = Field(default_factory=dict)  # "Market · Expert" -> "[mm:ss] verbatim quote"
 
 
 class ComparisonMetric(BaseModel):
-    """Structured metric for cross-expert side-by-side comparison."""
+    """One guide question compared across every loaded transcript."""
     dimension: str
-    france: str
-    germany: str
-    uk: str
+    cells: Dict[str, str] = Field(default_factory=dict)  # market -> "[mm:ss] verbatim quote"
 
 
 class CrossExpertSynthesis(BaseModel):
@@ -95,6 +93,8 @@ class CrossExpertSynthesis(BaseModel):
     common_themes: List[CrossExpertTheme]
     disagreements: List[CrossExpertDisagreement]
     comparison_matrix: List[ComparisonMetric]
+    method: str = "Computed from the transcripts"
+    notes: str = ""
 
 
 class QAResponse(BaseModel):

@@ -49,3 +49,15 @@ def test_parse_uk_transcript():
     assert "Urologist" in transcript.profile.role
     assert transcript.total_turns > 5
     assert any(t.timestamp == "00:14" for t in transcript.turns)
+
+
+def test_two_experts_from_the_same_market_get_distinct_ids():
+    header = "Expert 1 – {name}\nRole: Urologist\nMarket: France\n\n00:00\nInterviewer: Hello there.\n"
+    first = parse_transcript(header.format(name="Dr. Jean Martin"), "a.txt")
+    second = parse_transcript(header.format(name="Dr. Marc Dupont"), "b.txt")
+    assert first.profile.id != second.profile.id
+
+
+def test_upload_without_a_header_number_is_identified_by_filename():
+    text = "Dr. X\nRole: Surgeon\nMarket: Italy\n\n00:00\nInterviewer: Hello there.\n"
+    assert parse_transcript(text, "Italy call.txt").profile.id == "uploaded_italy_call"

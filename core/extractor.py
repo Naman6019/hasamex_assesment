@@ -96,9 +96,13 @@ def _relevance(text: str, question_id: int) -> int:
     return score
 
 
+def split_sentences(text: str) -> List[str]:
+    return [sentence for sentence in re.split(r"(?<=[.!?])\s+", text.strip()) if sentence]
+
+
 def pick_highlight(text: str, question_id: int) -> str:
     """The sentence(s) of ``text`` that best answer the question, as an exact substring."""
-    sentences = [sentence for sentence in re.split(r"(?<=[.!?])\s+", text.strip()) if sentence]
+    sentences = split_sentences(text)
     if len(sentences) < 2:
         return text.strip()
     best = max(range(len(sentences)), key=lambda i: (_relevance(sentences[i], question_id), -i))

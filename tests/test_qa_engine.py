@@ -34,9 +34,9 @@ def test_cross_expert_synthesis():
     synthesis = generate_cross_expert_synthesis(transcripts)
 
     assert len(synthesis.common_themes) >= 3
-    assert len(synthesis.disagreements) >= 3
+    assert len(synthesis.disagreements) >= 2
     assert len(synthesis.comparison_matrix) == 6
-    assert "adoption" in synthesis.executive_summary.lower()
+    assert "3 expert calls" in synthesis.executive_summary
 
 
 def test_grounded_qa_retrieval():

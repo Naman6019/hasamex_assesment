@@ -8,7 +8,7 @@ A static, read-only walkthrough of the same case is hosted at https://hasamex-ex
 
 - Parses transcript metadata, speakers, and timestamps into structured turns.
 - Answers each of the six interview-guide questions per expert, quoting the expert verbatim with the key sentence highlighted.
-- Shows consensus themes, disagreements, and a side-by-side comparison, each backed by timestamped quotes.
+- Computes a cross-call comparison, recurring themes, and disagreements from whichever transcripts are loaded, each backed by timestamped quotes. Add a transcript and everything updates.
 - **Ask across the calls:** retrieves timestamped source passages, scores how well they cover the question, and refuses questions the transcripts cannot answer.
 - Lets reviewers open the surrounding dialogue for any citation.
 - Accepts additional `.txt` transcripts for the active browser session.
@@ -27,6 +27,17 @@ A static, read-only walkthrough of the same case is hosted at https://hasamex-ex
 3. any market named in the claim must be a market it cites.
 
 If no claim survives, or the reply is not valid JSON, the app shows source passages instead. If the model judges the passages insufficient, the app refuses. No model is called when retrieval has already refused.
+
+## How the cross-call synthesis works
+
+Nothing in `core/analyzer.py` is written about a particular call. From the loaded transcripts it computes:
+
+- **Comparison table:** each expert's cited answer to every guide question, one column per market (or "market · expert" if two calls share a market).
+- **Themes:** words that recur in expert answers across at least half the calls, clustered by the passages they appear in, with one verbatim quote per call. The "supported by k of N calls" count is the number of quotes shown.
+- **Disagreements:** guide questions where two or more experts quote figures and the figures differ (for example 15-20% vs. high single digits, or six to twelve vs. nine to eighteen months). Number words and digits are compared as values.
+- **Executive summary:** a template filled from the results above.
+
+With a model configured, **"Draft themes and disagreements with the model"** asks it for richer themes and disagreements. Each item must cite quotes from at least two different calls; an item is dropped if any quote is not verbatim in its source turn, or if a figure or market named in its text is not backed by its quotes. Supporting-call counts are recounted from the verified quotes. If nothing survives, the computed results are shown and the app says so.
 
 ## Run locally
 
@@ -51,7 +62,7 @@ For a hosted model, set `CLOUD_MODEL_BASE_URL`, `CLOUD_MODEL_NAME`, and `CLOUD_M
 python -m pytest tests -q -p no:cacheprovider
 ```
 
-The tests cover: parsing; quote verification; a hand-checked gold set of which turn answers each of the six questions for each expert; refusal of out-of-scope questions; single-keyword and substring-match regressions; market and expert filtering; the model step with stub models (fabricated quote, wrong-source quote, invented number, misattributed market, partial failure, malformed JSON, model refusal); and that all synthesis evidence is verbatim source text.
+The tests cover: parsing; quote verification; a hand-checked gold set of which turn answers each of the six questions for each expert; refusal of out-of-scope questions; single-keyword and substring-match regressions; market and expert filtering; the model step with stub models (fabricated quote, wrong-source quote, invented number, misattributed market, partial failure, malformed JSON, model refusal); that the synthesis follows its inputs (added, removed, renamed and duplicate transcripts, in the running app too), that all synthesis evidence is verbatim source text, and the model-draft verifier with stub models.
 
 ## Architecture
 
@@ -64,15 +75,15 @@ Transcript files
     -> Streamlit:  evidence cards, context, synthesis, export
 ```
 
-Modules: `core/parser.py`, `core/extractor.py` (guide answers), `core/qa_engine.py` (retrieval and answering), `core/answer_generator.py` (model prompt and claim verification), `core/analyzer.py` (cross-expert synthesis), `core/llm_service.py` (model clients).
+Modules: `core/parser.py`, `core/extractor.py` (guide answers), `core/qa_engine.py` (retrieval and answering), `core/answer_generator.py` (model prompt and claim/quote verification), `core/analyzer.py` (computed comparison, themes, disagreements), `core/synthesis_model.py` (optional verified model-drafted themes), `core/llm_service.py` (model clients).
 
 ## Known limitations
 
-- **Themes, disagreements, and the comparison table are hand-authored** for these three calls (`core/analyzer.py`). Every supporting quote is checked verbatim by the tests, but the wording is not generated, so uploaded transcripts do not change them. Generating them per corpus is the next step.
+- **Computed themes are lexical.** Themes are recurring words clustered by the passages they appear in, so titles read like "Clinical · Economics" rather than a written headline, and a generic word ("system") can occasionally lead one. Disagreements are detected only where experts quote figures that differ; a qualitative disagreement (finance decides vs. finance is balanced) needs the model draft, whose quotes are verified but whose judgement that two positions really differ is the model's.
 - Retrieval is lexical. It cannot tell "capital budget" from "capital of France" on keywords alone; it flags that case as a Low-confidence keyword hit, and the model step (when enabled) can refuse it. Superlative questions ("which country is fastest?") are usually refused rather than answered.
 - The model step is verified with stub models. It has not been run against a live model in this repository.
 - Answers are ranked by transcript turn, not sub-turn, and the synonym list is small and specific to this interview guide.
 
 ## Scaling beyond three calls
 
-Persist turns and metadata in Postgres; add dense embeddings alongside the lexical index for hybrid retrieval and rerank; queue parsing and embedding jobs; generate themes per project with the same claim-plus-verified-quote contract used for Q&A; and keep the citation schema (transcript, speaker, timestamp, character offsets) identical from ingestion through export.
+Persist turns and metadata in Postgres; add dense embeddings alongside the lexical index for hybrid retrieval and rerank; queue parsing and embedding jobs; run the model-drafted synthesis map-reduce style per topic (it already falls back to guide-cited turns above 120 expert turns); and keep the citation schema (transcript, speaker, timestamp, character offsets) identical from ingestion through export.

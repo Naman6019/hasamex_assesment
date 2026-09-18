@@ -1,0 +1,20 @@
+# Secrets: copy .env.example to .env locally and never commit it
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Editor / agent tooling
+.codegraphy/
+.kilo/
+.claude/
+
+# Separate Next.js project that backs the hosted review site. It has its own
+# git history, node_modules and build output, so it is not part of this repo.
+shareable_review_site/

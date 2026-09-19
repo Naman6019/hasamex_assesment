@@ -1,5 +1,6 @@
 """End-to-end: the running Streamlit app must update when the loaded transcripts change."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -17,10 +18,19 @@ def summary_text(at):
     return next(m.value for m in at.markdown if m.value.startswith("Across "))
 
 
+def matrix_markets(at):
+    """Markets shown as columns in the cross-market comparison cards."""
+    return [
+        re.search(r"matrix-market\">([^<]+)<", m.value).group(1)
+        for m in at.markdown
+        if "matrix-market\">" in m.value
+    ]
+
+
 def test_app_updates_columns_metrics_and_summary_when_a_transcript_is_added():
     at = AppTest.from_file(APP, default_timeout=60).run()
     assert not at.exception
-    assert list(at.dataframe[0].value.columns) == ["Dimension", "France", "Germany", "United Kingdom"]
+    assert matrix_markets(at) == ["France", "Germany", "United Kingdom"] * 6
     assert at.metric[0].value == "3"
     before = summary_text(at)
     assert "3 expert calls" in before
@@ -30,7 +40,7 @@ def test_app_updates_columns_metrics_and_summary_when_a_transcript_is_added():
     ]
     at.run()
     assert not at.exception
-    assert list(at.dataframe[0].value.columns)[-1] == "Italy"
+    assert "Italy" in matrix_markets(at)
     assert at.metric[0].value == "4"
     after = summary_text(at)
     assert "4 expert calls" in after and "Italy" in after

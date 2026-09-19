@@ -1,6 +1,7 @@
 """Hasamex technical-case demo: source-grounded expert-call analysis."""
 
 import html
+import re
 from pathlib import Path
 from typing import List
 
@@ -9,7 +10,12 @@ from dotenv import load_dotenv
 
 from core.analyzer import generate_cross_expert_synthesis
 from core.extractor import ExpertAnswerExtractor, INTERVIEW_QUESTIONS
-from core.llm_service import LocalModelService, get_hosted_model_service, list_local_models
+from core.llm_service import (
+    LocalModelService,
+    build_hosted_model_service,
+    get_hosted_model_service,
+    list_local_models,
+)
 from core.models import CrossExpertSynthesis, ExpertTranscript, QuoteCitation
 from core.parser import parse_transcript
 from core.qa_engine import CrossTranscriptQA
@@ -18,7 +24,7 @@ from core.qa_engine import CrossTranscriptQA
 load_dotenv()
 
 st.set_page_config(
-    page_title="Hasamex | Expert Call Analyzer",
+    page_title="Hasamex Expert Call Analyzer",
     page_icon="🔎",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -40,10 +46,34 @@ st.markdown(
                      background: #e8f0fb; color: #1e4b7a; font-size: .78rem; font-weight: 700; }
       .subtle { color: #475569; font-size: .9rem; }
       .quote-card mark { background: #fef3c7; color: inherit; padding: 1px 2px; border-radius: 3px; }
+      .matrix-question { font-weight: 700; color: #0b2745; margin: 20px 0 8px; }
+      .matrix-card { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #1f4c7a;
+                     border-radius: 7px; padding: 12px 14px; height: 100%; }
+      .matrix-market { color: #1e4b7a; font-size: .78rem; font-weight: 700; margin-bottom: 7px; }
+      .matrix-ts { display: inline-block; background: #e8f0fb; color: #1e4b7a; border-radius: 999px;
+                   padding: 1px 8px; font-size: .72rem; font-weight: 700; margin-right: 6px;
+                   vertical-align: 1px; }
+      .matrix-quote { line-height: 1.5; color: #1f2937; }
+      .matrix-empty { color: #94a3b8; font-style: italic; }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+HOSTED_PROVIDERS = {
+    "OpenAI": "https://api.openai.com",
+    "OpenRouter": "https://openrouter.ai/api",
+    "Together AI": "https://api.together.xyz",
+    "Groq": "https://api.groq.com/openai",
+    "Custom endpoint": "",
+}
+
+
+@st.cache_data(show_spinner=False, ttl=30)
+def cached_local_models() -> List[str]:
+    """Probe a local Ollama server once per session window, not on every rerun."""
+    return list_local_models()
 
 
 @st.cache_data(show_spinner=False)
@@ -119,6 +149,29 @@ def citation_card(citation: QuoteCitation) -> None:
     )
 
 
+def comparison_card(label: str, cell: str) -> None:
+    """Render one comparison-matrix cell as a readable evidence card."""
+    timestamp = ""
+    quote = cell
+    match = re.match(r"^\[(\d{2}:\d{2})\]\s*(.*)$", cell, re.DOTALL)
+    if match:
+        timestamp, quote = match.group(1), match.group(2).strip()
+    body = (
+        f"{html.escape(quote)}"
+        if quote
+        else "<span class='matrix-empty'>No relevant answer in this transcript.</span>"
+    )
+    st.markdown(
+        f"""
+        <div class="matrix-card">
+          <div class="matrix-market">{html.escape(label)}</div>
+          <div><span class="matrix-ts">{html.escape(timestamp) or "—"}</span>{body}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def turn_context(transcript: ExpertTranscript, citation: QuoteCitation) -> None:
     nearby_turns = [
         turn
@@ -136,6 +189,12 @@ if "inference_mode" not in st.session_state:
     st.session_state.inference_mode = "Evidence-only"
 if "selected_model" not in st.session_state:
     st.session_state.selected_model = ""
+if "byo_base_url" not in st.session_state:
+    st.session_state.byo_base_url = ""
+if "byo_model" not in st.session_state:
+    st.session_state.byo_model = ""
+if "byo_api_key" not in st.session_state:
+    st.session_state.byo_api_key = ""
 if "qa_query" not in st.session_state:
     st.session_state.qa_query = ""
 if "run_qa" not in st.session_state:
@@ -147,6 +206,8 @@ def model_key() -> tuple:
     return (
         st.session_state.inference_mode,
         st.session_state.selected_model,
+        st.session_state.get("byo_base_url", ""),
+        st.session_state.get("byo_model", ""),
         tuple(t.profile.id for t in st.session_state.transcripts),
     )
 
@@ -169,7 +230,7 @@ def current_synthesis() -> CrossExpertSynthesis:
 
 
 with st.sidebar:
-    st.title("Hasamex Intelligence")
+    st.title("Hasamex Expert Call Analyzer")
     st.caption("Expert-call research, built for reviewable evidence.")
     st.divider()
 
@@ -181,13 +242,13 @@ with st.sidebar:
     st.metric("Interview-guide questions", len(INTERVIEW_QUESTIONS))
     st.caption("Every displayed quote is checked against its source transcript.")
 
-    local_models = list_local_models()
-    hosted_service = get_hosted_model_service()
+    local_models = cached_local_models()
+    server_hosted_service = get_hosted_model_service()
     available_modes = ["Evidence-only"]
     if local_models:
         available_modes.append("Private local Ollama")
-    if hosted_service:
-        available_modes.append("Hosted compatible API")
+    available_modes.append("Hosted compatible API")
+
     if st.session_state.inference_mode not in available_modes:
         st.session_state.inference_mode = "Evidence-only"
 
@@ -214,10 +275,38 @@ with st.sidebar:
             )
             st.caption("Retrieved source turns are sent only to your local Ollama server.")
         else:
-            st.caption(
-                "Retrieved source turns are sent to the configured provider. "
-                "Credentials come from server-side environment variables and are never shown."
-            )
+            if server_hosted_service is not None:
+                st.success(
+                    f"Using the server-configured provider ({server_hosted_service.base_url}). "
+                    "No key needed here."
+                )
+            else:
+                st.caption(
+                    "No provider is configured on the server. Enter your own OpenAI-compatible endpoint and key "
+                    "below to use this mode; they stay in your browser session and are never stored."
+                )
+                provider = st.selectbox("Provider", list(HOSTED_PROVIDERS), index=0)
+                default_url = HOSTED_PROVIDERS[provider]
+                st.session_state.byo_base_url = st.text_input(
+                    "Base URL",
+                    value=st.session_state.get("byo_base_url") or default_url,
+                    placeholder="https://api.openai.com",
+                )
+                st.session_state.byo_model = st.text_input(
+                    "Model name",
+                    value=st.session_state.get("byo_model") or "",
+                    placeholder="e.g. gpt-4o-mini",
+                )
+                st.session_state.byo_api_key = st.text_input(
+                    "API key",
+                    value=st.session_state.get("byo_api_key") or "",
+                    type="password",
+                    help="Used only for this session to call the provider you named. Never written to disk.",
+                )
+                st.caption(
+                    "Retrieved source turns and your question are sent to that provider. "
+                    "Only retrieved candidate turns are sent, never the full transcripts."
+                )
 
     st.divider()
     st.download_button(
@@ -232,7 +321,11 @@ with st.sidebar:
 if st.session_state.inference_mode == "Private local Ollama":
     llm_service = LocalModelService(model=st.session_state.selected_model)
 elif st.session_state.inference_mode == "Hosted compatible API":
-    llm_service = hosted_service
+    llm_service = server_hosted_service or build_hosted_model_service(
+        model=st.session_state.get("byo_model", ""),
+        base_url=st.session_state.get("byo_base_url", ""),
+        api_key=st.session_state.get("byo_api_key", ""),
+    )
 else:
     llm_service = None
 extractor = ExpertAnswerExtractor()
@@ -242,14 +335,11 @@ qa_engine = CrossTranscriptQA(st.session_state.transcripts, llm_service=llm_serv
 st.markdown(
     """
     <div class="hero">
-      <h1>Expert Call Analyzer</h1>
+      <h1>Hasamex Expert Call Analyzer</h1>
       <p>Turn three expert calls into a reviewable market brief—every finding keeps its source quote and timestamp.</p>
     </div>
     """,
     unsafe_allow_html=True,
-)
-st.info(
-    "Start with the market brief, answer the six guide questions, then inspect the evidence behind any conclusion."
 )
 
 overview_tab, guide_tab, themes_tab, qa_tab, sources_tab, architecture_tab = st.tabs(
@@ -285,16 +375,22 @@ with overview_tab:
         with column:
             profile = transcript.profile
             with st.container(border=True):
-                st.markdown(f"<span class='market-chip'>{profile.country_flag} {profile.market}</span>", unsafe_allow_html=True)
+                st.markdown(f"<span class='market-chip'>{profile.market}</span>", unsafe_allow_html=True)
                 st.markdown(f"#### {profile.name}")
                 st.write(profile.role)
                 st.caption(f"{transcript.total_turns} turns · {transcript.duration_str} duration")
 
     st.subheader("Cross-market comparison")
-    matrix_rows = [{"Dimension": item.dimension, **item.cells} for item in synthesis.comparison_matrix]
-    st.dataframe(matrix_rows, use_container_width=True, hide_index=True)
+    for item in synthesis.comparison_matrix:
+        if not item.cells:
+            continue
+        st.markdown(f"<div class='matrix-question'>{html.escape(item.dimension)}</div>", unsafe_allow_html=True)
+        matrix_columns = st.columns(len(item.cells))
+        for column, (label, cell) in zip(matrix_columns, item.cells.items()):
+            with column:
+                comparison_card(label, cell)
     st.caption(
-        "Each cell is the expert's own answer with its timestamp; the columns follow whichever transcripts are loaded."
+        "Each card is the expert's own answer with its timestamp; the columns follow whichever transcripts are loaded."
     )
 
 
@@ -319,7 +415,7 @@ with guide_tab:
             if item.question_id == selected_question["id"]
         )
         with column:
-            st.markdown(f"#### {transcript.profile.country_flag} {transcript.profile.market}")
+            st.markdown(f"#### {transcript.profile.market}")
             st.caption(f"{transcript.profile.name} · {transcript.profile.role}")
             if not answer.citations:
                 st.warning("No directly relevant answer was found in this transcript.")
@@ -441,7 +537,7 @@ with sources_tab:
         transcript = st.selectbox(
             "Transcript",
             st.session_state.transcripts,
-            format_func=lambda item: f"{item.profile.country_flag} {item.profile.name} — {item.profile.market}",
+            format_func=lambda item: f"{item.profile.name} — {item.profile.market}",
         )
         keyword = st.text_input("Filter source turns", placeholder="e.g. budget, training, months")
         turns = transcript.turns
@@ -494,8 +590,10 @@ with architecture_tab:
         is a market cited. Claims that fail are dropped, and if none survive the app shows source passages instead.
 
         **5. Privacy modes.** Evidence-only mode makes no model call. Local Ollama keeps retrieved source turns on the device.
-        Hosted mode sends only retrieved candidate turns (never the full transcripts) to the configured provider and keeps
-        its API key in server-side configuration. No model is called when retrieval has already refused the question.
+        Hosted mode sends only retrieved candidate turns (never the full transcripts) to the configured provider. That provider
+        is either configured server-side by the operator, or supplied by the reviewer in the sidebar; a reviewer-supplied key
+        stays in the browser session, is never written to disk, and never appears in an export. No model is called when
+        retrieval has already refused the question.
 
         **6. Cross-call synthesis.** Nothing is hand-written about a particular call. The comparison table is each expert's
         cited answer to every guide question; themes are topics that recur across at least half of the loaded calls

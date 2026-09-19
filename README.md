@@ -52,9 +52,18 @@ Open `http://localhost:8501`. Run from the repository root; the app reads the th
 
 No API key is required. Evidence-only mode is the default and makes no model call.
 
-For a local model, run Ollama; if it listens somewhere other than `http://127.0.0.1:11434`, copy `.env.example` to `.env` and set `OLLAMA_BASE_URL`.
+### Optional model modes
 
-For a hosted model, set `CLOUD_MODEL_BASE_URL`, `CLOUD_MODEL_NAME`, and `CLOUD_MODEL_API_KEY` in `.env` or in server-side secrets. `.env` is git-ignored; never commit a key or put one in browser code. Hosted mode sends only the retrieved candidate turns, never full transcripts.
+The LLM is additive. Every guide answer, quote, timestamp, theme, disagreement and refusal works in Evidence-only mode with no model at all.
+
+**Local Ollama.** Run Ollama; if it listens somewhere other than `http://127.0.0.1:11434`, copy `.env.example` to `.env` and set `OLLAMA_BASE_URL`. The app probes for local models once per 30 seconds, so a hosted deployment does not pay a loopback timeout on every rerun.
+
+**Hosted OpenAI-compatible provider.** There are two ways to configure it, and both are optional:
+
+1. **Server-side (recommended for a deployed app).** Set `CLOUD_MODEL_BASE_URL`, `CLOUD_MODEL_NAME` and `CLOUD_MODEL_API_KEY`. Locally these come from `.env` (git-ignored); on Streamlit Community Cloud paste them into **Advanced settings → Secrets**, where Streamlit exposes them to the app as environment variables. Never commit a key.
+2. **Reviewer-supplied in the sidebar.** If no server-side provider is configured, selecting "Hosted compatible API" reveals a provider, base URL, model name and API-key field. A key entered here lives only in that browser session: it is never written to disk, never logged, and never included in the Markdown export. This lets a reviewer try the model path on a hosted deployment without the operator holding a key.
+
+Hosted mode sends only the retrieved candidate turns, never full transcripts. No model is called when retrieval has already refused the question.
 
 ## Tests
 
@@ -76,6 +85,16 @@ Transcript files
 ```
 
 Modules: `core/parser.py`, `core/extractor.py` (guide answers), `core/qa_engine.py` (retrieval and answering), `core/answer_generator.py` (model prompt and claim/quote verification), `core/analyzer.py` (computed comparison, themes, disagreements), `core/synthesis_model.py` (optional verified model-drafted themes), `core/llm_service.py` (model clients).
+
+## Deploy
+
+The app runs on Streamlit Community Cloud with no configuration and no secrets, because Evidence-only is the default:
+
+1. Push this repository to GitHub.
+2. At [share.streamlit.io](https://share.streamlit.io), choose **Create app → Deploy a public app from GitHub**.
+3. Set the main file path to `app.py` and deploy. Community Cloud installs `requirements.txt` automatically.
+
+Nothing else is required. If you want the hosted model mode available to reviewers, either add the `CLOUD_MODEL_*` secrets in **Advanced settings → Secrets**, or leave it unset and let reviewers enter their own key in the sidebar.
 
 ## Known limitations
 

@@ -361,7 +361,7 @@ class CrossTranscriptQA:
                         transcript_id=turn["expert_id"],
                     )
                 )
-                header = f"{turn['flag']} {turn['expert_name']} ({turn['role']}, {turn['market']})"
+                header = f"{turn['expert_name']} ({turn['role']}, {turn['market']})"
                 if header not in experts:
                     experts.append(header)
 
@@ -389,7 +389,7 @@ class CrossTranscriptQA:
         by_expert: Dict[str, List[Dict[str, Any]]] = {}
         for turn in relevant_turns:
             if not turn["is_interviewer"]:
-                header = f"{turn['flag']} {turn['expert_name']} ({turn['role']}, {turn['market']})"
+                header = f"{turn['expert_name']} ({turn['role']}, {turn['market']})"
                 by_expert.setdefault(header, []).append(turn)
 
         answer_lines = ["### Evidence found in the transcripts", ""]

@@ -101,3 +101,20 @@ def get_hosted_model_service() -> Optional[HostedModelService]:
         api_key=os.getenv("CLOUD_MODEL_API_KEY", ""),
     )
     return service if service.is_configured() else None
+
+
+def build_hosted_model_service(
+    model: str, base_url: str, api_key: str
+) -> Optional[HostedModelService]:
+    """Return an adapter from reviewer-supplied settings, or None if any part is missing.
+
+    This backs the in-app "bring your own key" field. The credential arrives in
+    the browser request, lives only in the server-side session, and is never
+    written to disk or included in an export.
+    """
+    service = HostedModelService(
+        model=(model or "").strip(),
+        base_url=(base_url or "").strip(),
+        api_key=(api_key or "").strip(),
+    )
+    return service if service.is_configured() else None

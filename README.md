@@ -100,7 +100,7 @@ Nothing else is required. If you want the hosted model mode available to reviewe
 
 - **Computed themes are lexical.** Themes are recurring words clustered by the passages they appear in, so titles read like "Clinical · Economics" rather than a written headline, and a generic word ("system") can occasionally lead one. Disagreements are detected only where experts quote figures that differ; a qualitative disagreement (finance decides vs. finance is balanced) needs the model draft, whose quotes are verified but whose judgement that two positions really differ is the model's.
 - Retrieval is lexical. It cannot tell "capital budget" from "capital of France" on keywords alone; it flags that case as a Low-confidence keyword hit, and the model step (when enabled) can refuse it. Superlative questions ("which country is fastest?") are usually refused rather than answered.
-- The model step is verified with stub models. It has not been run against a live model in this repository.
+- The automated model-step tests use stub models, never a live provider. The hosted path has been exercised by hand against a real OpenAI-compatible provider, but the test suite itself does not assert on a live model's output.
 - Answers are ranked by transcript turn, not sub-turn, and the synonym list is small and specific to this interview guide.
 
 ## Scaling beyond three calls

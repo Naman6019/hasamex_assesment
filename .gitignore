@@ -15,6 +15,11 @@ venv/
 .kilo/
 .claude/
 
+# Local-only working notes and generated report artifacts
+VIDEO_SCRIPT.md
+.graphitect-agent/
+hasamex-graphitect.html
+
 # Separate Next.js project that backs the hosted review site. It has its own
 # git history, node_modules and build output, so it is not part of this repo.
 shareable_review_site/

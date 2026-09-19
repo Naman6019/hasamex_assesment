@@ -33,28 +33,46 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      .stApp { background: #fbfcfe; }
-      .hero { background: linear-gradient(115deg, #0b2745, #1f4c7a); border-radius: 14px;
-              color: white; padding: 28px 30px; margin: 4px 0 20px; }
+      :root { --ink:#10243f; --muted:#637189; --line:#dfe6ef; --canvas:#f4f7fb;
+              --navy:#0b1f38; --teal:#07877f; --paper:#ffffff; }
+      .stApp { background: var(--canvas); }
+      .hero { background: linear-gradient(115deg, var(--navy), #0b5675); border-radius: 14px;
+              color: white; padding: 28px 30px; margin: 4px 0 18px; }
       .hero h1, .hero p { color: white !important; margin: 0; }
       .hero p { opacity: .86; margin-top: 7px; }
-      .quote-card { background: #f8fafc; border-left: 4px solid #0f766e; border-radius: 7px;
+
+      /* Section header with an eyebrow label, in the review-site's language. */
+      .section-head { max-width: 760px; margin: 4px 0 18px; }
+      .section-head .eyebrow { color: var(--teal); font-size: .70rem; font-weight: 800;
+                               letter-spacing: .1em; text-transform: uppercase; margin: 0 0 6px; }
+      .section-head h2 { color: var(--ink); font-size: 1.7rem; line-height: 1.15;
+                         letter-spacing: -.02em; margin: 0; }
+      .section-head .detail { display: block; margin-top: 8px; color: var(--muted);
+                              font-size: .95rem; line-height: 1.5; }
+
+      .quote-card { background: var(--paper); border: 1px solid var(--line);
+                    border-left: 4px solid var(--teal); border-radius: 7px;
                     padding: 13px 15px; margin: 8px 0 14px; line-height: 1.55; }
-      .source-label { color: #0f766e; font-size: .82rem; font-weight: 700; margin-bottom: 5px; }
-      .source-proof { color: #047857; font-size: .76rem; font-weight: 650; }
+      .source-label { color: var(--teal); font-size: .82rem; font-weight: 700; margin-bottom: 5px; }
+      .source-proof { color: #0c766e; font-size: .76rem; font-weight: 650; }
       .market-chip { display: inline-block; border-radius: 999px; padding: 3px 9px;
-                     background: #e8f0fb; color: #1e4b7a; font-size: .78rem; font-weight: 700; }
-      .subtle { color: #475569; font-size: .9rem; }
+                     background: #e8f4f3; color: #075d5a; font-size: .78rem; font-weight: 700; }
+      .subtle { color: var(--muted); font-size: .9rem; }
       .quote-card mark { background: #fef3c7; color: inherit; padding: 1px 2px; border-radius: 3px; }
-      .matrix-question { font-weight: 700; color: #0b2745; margin: 20px 0 8px; }
-      .matrix-card { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #1f4c7a;
-                     border-radius: 7px; padding: 12px 14px; height: 100%; }
-      .matrix-market { color: #1e4b7a; font-size: .78rem; font-weight: 700; margin-bottom: 7px; }
-      .matrix-ts { display: inline-block; background: #e8f0fb; color: #1e4b7a; border-radius: 999px;
+      .matrix-question { font-weight: 700; color: var(--navy); margin: 20px 0 8px; }
+      .matrix-card { background: var(--paper); border: 1px solid var(--line);
+                     border-left: 4px solid #159a91; border-radius: 7px;
+                     padding: 12px 14px; height: 100%; }
+      .matrix-market { color: #075d5a; font-size: .78rem; font-weight: 700; margin-bottom: 7px; }
+      .matrix-ts { display: inline-block; background: #e8f4f3; color: #075d5a; border-radius: 999px;
                    padding: 1px 8px; font-size: .72rem; font-weight: 700; margin-right: 6px;
                    vertical-align: 1px; }
-      .matrix-quote { line-height: 1.5; color: #1f2937; }
+      .matrix-quote { line-height: 1.5; color: #263b55; }
       .matrix-empty { color: #94a3b8; font-style: italic; }
+
+      /* Streamlit renders the active tab as a red underline by default. */
+      .stTabs [data-baseweb="tab-highlight"] { background-color: var(--teal); }
+      .stTabs [aria-selected="true"] { color: var(--navy); font-weight: 700; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -124,6 +142,21 @@ def build_report(synthesis: CrossExpertSynthesis) -> str:
     if not synthesis.disagreements:
         lines.extend(["No conflicting positions were identified.", ""])
     return "\n".join(lines)
+
+
+def section_header(eyebrow: str, title: str, detail: str = "") -> None:
+    """Eyebrow, title and detail, styled like the review site's section headers."""
+    detail_html = f"<span class='detail'>{html.escape(detail)}</span>" if detail else ""
+    st.markdown(
+        f"""
+        <div class="section-head">
+          <p class="eyebrow">{html.escape(eyebrow)}</p>
+          <h2>{html.escape(title)}</h2>
+          {detail_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def citation_card(citation: QuoteCitation) -> None:
@@ -355,7 +388,12 @@ overview_tab, guide_tab, themes_tab, qa_tab, sources_tab, architecture_tab = st.
 
 
 with overview_tab:
-    st.subheader("Suggested review path")
+    section_header(
+        "Start here",
+        "A short, traceable market review.",
+        "Read the brief, compare the calls, then open the exact evidence behind any finding.",
+    )
+    st.markdown("#### Suggested review path")
     step_one, step_two, step_three = st.columns(3)
     with step_one:
         st.markdown("**1. Read the brief**")
@@ -367,7 +405,7 @@ with overview_tab:
         st.markdown("**3. Verify the evidence**")
         st.caption("Use timestamps and surrounding dialogue before relying on a conclusion.")
 
-    st.subheader("Executive readout")
+    st.markdown("#### Executive readout")
     st.write(synthesis.executive_summary)
 
     expert_columns = st.columns(len(st.session_state.transcripts))
@@ -380,7 +418,7 @@ with overview_tab:
                 st.write(profile.role)
                 st.caption(f"{transcript.total_turns} turns · {transcript.duration_str} duration")
 
-    st.subheader("Cross-market comparison")
+    st.markdown("#### Cross-market comparison")
     for item in synthesis.comparison_matrix:
         if not item.cells:
             continue
@@ -395,17 +433,32 @@ with overview_tab:
 
 
 with guide_tab:
-    st.subheader("Interview-guide answers")
-    selected_question = st.selectbox(
-        "Question",
-        INTERVIEW_QUESTIONS,
-        format_func=lambda question: f"Q{question['id']} · {question['short_label']}",
+    section_header(
+        "Interview guide",
+        "Six questions. Direct answers from each expert.",
+        "The response cards show the original expert wording, not a model-generated summary.",
     )
-    st.write(selected_question["text"])
-    st.caption(
-        "Each card is the expert's verbatim answer with the key sentence highlighted. "
-        "Expand a card to read the surrounding dialogue."
+    if "guide_question_id" not in st.session_state:
+        st.session_state.guide_question_id = INTERVIEW_QUESTIONS[0]["id"]
+
+    question_columns = st.columns(len(INTERVIEW_QUESTIONS))
+    for column, question in zip(question_columns, INTERVIEW_QUESTIONS):
+        with column:
+            is_selected = st.session_state.guide_question_id == question["id"]
+            if st.button(
+                f"Q{question['id']} · {question['short_label']}",
+                key=f"guide_q_{question['id']}",
+                type="primary" if is_selected else "secondary",
+                use_container_width=True,
+            ):
+                st.session_state.guide_question_id = question["id"]
+                st.rerun()
+
+    selected_question = next(
+        question for question in INTERVIEW_QUESTIONS if question["id"] == st.session_state.guide_question_id
     )
+    st.markdown(f"<div class='matrix-question'>{html.escape(selected_question['text'])}</div>", unsafe_allow_html=True)
+    st.caption("Each card is the expert's verbatim answer with the key sentence highlighted. Expand a card to read the surrounding dialogue.")
 
     answer_columns = st.columns(len(st.session_state.transcripts))
     for column, transcript in zip(answer_columns, st.session_state.transcripts):
@@ -426,7 +479,11 @@ with guide_tab:
 
 
 with themes_tab:
-    st.subheader("Consensus and disagreements")
+    section_header(
+        "Consensus & differences",
+        "Where the calls align — and where they differ.",
+        "These are comparisons, not averages. Open the sources to see each expert's exact position.",
+    )
     st.caption(f"How this was produced: {synthesis.method}.")
     if synthesis.notes:
         st.warning(synthesis.notes)
@@ -473,7 +530,12 @@ with themes_tab:
 
 
 with qa_tab:
-    st.subheader("Ask across all calls")
+    section_header(
+        "Ask the sources",
+        "Find evidence across the calls.",
+        "Search runs against the supplied, timestamped source passages. It will not invent an answer "
+        "if the calls do not discuss it.",
+    )
     if st.session_state.inference_mode == "Evidence-only":
         st.caption(
             "Returns the experts' own words with timestamps. Questions the transcripts cannot answer are refused, "
@@ -530,7 +592,11 @@ with qa_tab:
 
 
 with sources_tab:
-    st.subheader("Source transcripts")
+    section_header(
+        "Source transcripts",
+        "Read the calls directly.",
+        "Every quote in this app comes from these turns. Filter them, or add another transcript to the session.",
+    )
     source_view_tab, upload_tab = st.tabs(["Read and filter", "Upload a transcript"])
 
     with source_view_tab:
@@ -571,7 +637,11 @@ with sources_tab:
 
 
 with architecture_tab:
-    st.subheader("Technical design")
+    section_header(
+        "Method & privacy",
+        "Evidence is the product. Models are optional.",
+        "The rendering contract is identical in every mode: only verified source turns can appear as findings.",
+    )
     st.markdown(
         """
         **1. Ingestion.** Transcript headers and timestamps are parsed into structured speaker turns.
